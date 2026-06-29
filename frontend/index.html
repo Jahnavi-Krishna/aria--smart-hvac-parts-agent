@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Assistant</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      display: flex;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+    #app { width: 100%; max-width: 620px; }
+    h1 { color: #337778; margin-bottom: 16px; font-size: 22px; }
+    #messages {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      min-height: 300px;
+      max-height: 520px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      border: 1px solid #e0e0e0;
+    }
+    .msg { margin-bottom: 14px; display: flex; flex-direction: column; }
+    .msg.user { align-items: flex-end; }
+    .msg.bot  { align-items: flex-start; }
+    .bubble {
+      padding: 10px 14px;
+      max-width: 85%;
+      line-height: 1.5;
+      font-size: 14px;
+      border-radius: 12px;
+    }
+    .msg.user .bubble { background: #337778; color: white;
+                        border-radius: 12px 12px 0 12px; }
+    .msg.bot  .bubble { background: #f0f9f9; color: #1a1a1a;
+                        border-radius: 12px 12px 12px 0; }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .chip {
+      background: white;
+      border: 1.5px solid #337778;
+      color: #337778;
+      border-radius: 20px;
+      padding: 4px 14px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s;
+    }
+    .chip:hover { background: #337778; color: white; }
+    .listen-btn {
+      background: none;
+      border: none;
+      color: #337778;
+      font-size: 11px;
+      cursor: pointer;
+      margin-top: 4px;
+      padding: 0;
+    }
+    #input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    #user-input {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1.5px solid #337778;
+      font-size: 14px;
+      font-family: Arial, sans-serif;
+      outline: none;
+    }
+    #send-btn {
+      background: #337778;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.15s;
+    }
+    #send-btn:hover { background: #1f5f5b; }
+    #status {
+      font-size: 11px;
+      color: #999;
+      margin-top: 6px;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <h1 id="title">AI Assistant</h1>
+  <div id="messages"></div>
+  <div id="input-row">
+    <input id="user-input" placeholder="Ask anything..." />
+    <button id="send-btn">Send</button>
+  </div>
+  <div id="status"></div>
+</div>
+
+<script>
+  const API = 'http://localhost:8000';
+  let history = [];
+  let currentAudio = null;
+
+  async function send(text) {
+    if (!text.trim()) return;
+    addMessage('user', text);
+    document.getElementById('status').textContent = 'Thinking...';
+    document.getElementById('user-input').value = '';
+    document.getElementById('send-btn').disabled = true;
+
+    try {
+      const res = await fetch(`${API}/chat`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ message: text, history })
+      });
+      const data = await res.json();
+
+      history.push({role: 'user',      content: text});
+      history.push({role: 'assistant', content: data.answer});
+
+      addMessage('bot', data.answer, data.suggestions || []);
+      document.getElementById('status').textContent = '';
+    } catch (e) {
+      document.getElementById('status').textContent =
+        'Error — is the backend running on port 8000?';
+    } finally {
+      document.getElementById('send-btn').disabled = false;
+    }
+  }
+
+  async function speak(text) {
+    // TRADEOFF: server-side TTS (1-2s delay) chosen over
+    // browser Speech API for human-like warmth over instant robotic voice
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+    try {
+      const res = await fetch(`${API}/tts`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ text, voice: 'nova' })
+      });
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      currentAudio = new Audio(url);
+      currentAudio.play();
+    } catch (e) {
+      console.error('TTS error:', e);
+    }
+  }
+
+  function addMessage(role, text, chips = []) {
+    const msgs = document.getElementById('messages');
+    const div  = document.createElement('div');
+    div.className = `msg ${role}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    div.appendChild(bubble);
+
+    if (role === 'bot') {
+      const listenBtn = document.createElement('button');
+      listenBtn.className = 'listen-btn';
+      listenBtn.textContent = '🔊 Listen';
+      listenBtn.onclick = () => speak(text);
+      div.appendChild(listenBtn);
+    }
+
+    if (chips.length) {
+      const row = document.createElement('div');
+      row.className = 'chips';
+      chips.forEach(c => {
+        const btn = document.createElement('button');
+        btn.className = 'chip';
+        btn.textContent = c;
+        btn.onclick = () => send(c);
+        row.appendChild(btn);
+      });
+      div.appendChild(row);
+    }
+
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  document.getElementById('send-btn').onclick = () =>
+    send(document.getElementById('user-input').value);
+
+  document.getElementById('user-input')
+    .addEventListener('keypress', e => {
+      if (e.key === 'Enter') send(e.target.value);
+    });
+</script>
+</body>
+</html>
